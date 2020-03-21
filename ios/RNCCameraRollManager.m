@@ -27,7 +27,7 @@
 
 RCT_ENUM_CONVERTER(PHAssetCollectionSubtype, (@{
    @"album": @(PHAssetCollectionSubtypeAny),
-   @"all": @(PHAssetCollectionSubtypeSmartAlbumUserLibrary),
+   @"all": @(PHAssetCollectionSubtypeAny), // feone change old: PHAssetCollectionSubtypeSmartAlbumUserLibrary
    @"event": @(PHAssetCollectionSubtypeAlbumSyncedEvent),
    @"faces": @(PHAssetCollectionSubtypeAlbumSyncedFaces),
    @"library": @(PHAssetCollectionSubtypeSmartAlbumUserLibrary),
@@ -201,9 +201,25 @@ RCT_EXPORT_METHOD(getAlbums:(NSDictionary *)params
                   reject:(RCTPromiseRejectBlock)reject)
 {
   NSString *const mediaType = [params objectForKey:@"assetType"] ? [RCTConvert NSString:params[@"assetType"]] : @"All";
+  
   PHFetchOptions* options = [[PHFetchOptions alloc] init];
-  PHFetchResult<PHAssetCollection *> *const assetCollectionFetchResult = [PHAssetCollection fetchAssetCollectionsWithType:PHAssetCollectionTypeAlbum subtype:PHAssetCollectionSubtypeAny options:options];
   NSMutableArray * result = [NSMutableArray new];
+  
+  PHFetchResult<PHAssetCollection *> *const assetCollectionFetchResultSmartAlbum = [PHAssetCollection fetchAssetCollectionsWithType:PHAssetCollectionTypeSmartAlbum subtype:PHAssetCollectionSubtypeAny options:options];
+  [assetCollectionFetchResultSmartAlbum enumerateObjectsUsingBlock:^(PHAssetCollection * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+    PHFetchOptions *const assetFetchOptions = [RCTConvert PHFetchOptionsFromMediaType:mediaType fromTime:0 toTime:0];
+    // Enumerate assets within the collection
+    PHFetchResult<PHAsset *> *const assetsFetchResult = [PHAsset fetchAssetsInAssetCollection:obj options:assetFetchOptions];
+    if (assetsFetchResult.count > 0) {
+      [result addObject:@{
+        @"title": [obj localizedTitle],
+        @"count": @(assetsFetchResult.count),
+        @"uri": [NSString stringWithFormat:@"ph://%@", [[assetsFetchResult lastObject] localIdentifier]]
+      }];
+    }
+  }];
+  
+  PHFetchResult<PHAssetCollection *> *const assetCollectionFetchResult = [PHAssetCollection fetchAssetCollectionsWithType:PHAssetCollectionTypeAlbum subtype:PHAssetCollectionSubtypeAny options:options];
   [assetCollectionFetchResult enumerateObjectsUsingBlock:^(PHAssetCollection * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
     PHFetchOptions *const assetFetchOptions = [RCTConvert PHFetchOptionsFromMediaType:mediaType fromTime:0 toTime:0];
     // Enumerate assets within the collection
@@ -211,10 +227,12 @@ RCT_EXPORT_METHOD(getAlbums:(NSDictionary *)params
     if (assetsFetchResult.count > 0) {
       [result addObject:@{
         @"title": [obj localizedTitle],
-        @"count": @(assetsFetchResult.count)
+        @"count": @(assetsFetchResult.count),
+        @"uri": [NSString stringWithFormat:@"ph://%@", [[assetsFetchResult lastObject] localIdentifier]]
       }];
     }
   }];
+
   resolve(result);
 }
 
@@ -275,7 +293,7 @@ RCT_EXPORT_METHOD(getPhotos:(NSDictionary *)params
   // Filter collection name ("group")
   PHFetchOptions *const collectionFetchOptions = [PHFetchOptions new];
   collectionFetchOptions.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"endDate" ascending:NO]];
-  if (groupName != nil) {
+  if (groupName != nil && ![groupTypes isEqualToString:@"all"]) {
     collectionFetchOptions.predicate = [NSPredicate predicateWithFormat:[NSString stringWithFormat:@"localizedTitle == '%@'", groupName]];
   }
   
@@ -369,9 +387,22 @@ RCT_EXPORT_METHOD(getPhotos:(NSDictionary *)params
     };
 
     if ([groupTypes isEqualToString:@"all"]) {
-      PHFetchResult <PHAsset *> *const assetFetchResult = [PHAsset fetchAssetsWithOptions: assetFetchOptions];
-      currentCollectionName = @"All Photos";
-      [assetFetchResult enumerateObjectsUsingBlock:collectAsset];
+      PHFetchResult<PHAssetCollection *> *const assetCollectionFetchResult = [PHAssetCollection fetchAssetCollectionsWithType:collectionType subtype:collectionSubtype options:collectionFetchOptions];
+       NSLog(@"字符串:%@",assetCollectionFetchResult);
+      [assetCollectionFetchResult enumerateObjectsUsingBlock:^(PHAssetCollection * _Nonnull assetCollection, NSUInteger collectionIdx, BOOL * _Nonnull stopCollections) {
+        // Enumerate assets within the collection
+        NSLog(@"相册名:%@",[assetCollection localizedTitle]);
+        if ([[assetCollection localizedTitle] isEqualToString:groupName]) {
+          PHFetchResult<PHAsset *> *const assetsFetchResult = [PHAsset fetchAssetsInAssetCollection:assetCollection options:assetFetchOptions];
+        currentCollectionName = [assetCollection localizedTitle];
+        NSLog(@"找到指定相册:%@", groupName);
+        [assetsFetchResult enumerateObjectsUsingBlock:collectAsset];
+           *stopCollections = stopCollections_;
+        }
+      }];
+      // PHFetchResult <PHAsset *> *const assetFetchResult = [PHAsset fetchAssetsWithOptions: assetFetchOptions];
+      // currentCollectionName = @"All Photos";
+      // [assetFetchResult enumerateObjectsUsingBlock:collectAsset];
     } else {
       PHFetchResult<PHAssetCollection *> *const assetCollectionFetchResult = [PHAssetCollection fetchAssetCollectionsWithType:collectionType subtype:collectionSubtype options:collectionFetchOptions];
       [assetCollectionFetchResult enumerateObjectsUsingBlock:^(PHAssetCollection * _Nonnull assetCollection, NSUInteger collectionIdx, BOOL * _Nonnull stopCollections) {
